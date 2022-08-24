@@ -4,7 +4,7 @@ kind: Service
 metadata:
   name: webhook-service
   annotations:
-    service.beta.openshift.io/serving-cert-secret-name: openshift-rukpak-admission-webhook-tls
+    service.beta.openshift.io/serving-cert-secret-name: platform-operators-rukpak-webhook-tls
 spec:
   ports:
     - port: 443
