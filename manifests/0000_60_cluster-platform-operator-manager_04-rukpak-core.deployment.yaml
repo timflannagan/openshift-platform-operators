@@ -40,12 +40,12 @@ spec:
           name: certs
       - args:
         - --unpack-image=quay.io/operator-framework/rukpak:v0.8.0
-        - --base-upload-manager-url=https://platform-operators-rukpak-core.openshift-platform-operators.svc
         - --provisioner-storage-dir=/var/cache/bundles
         - --upload-storage-dir=/var/cache/uploads
+        - --bundle-ca-file=/etc/pki/tls/tls.crt
+        - --base-upload-manager-url=https://platform-operators-rukpak-core.openshift-platform-operators.svc
         - --http-bind-address=127.0.0.1:8080
         - --http-external-address=https://platform-operators-rukpak-core.openshift-platform-operators.svc
-        - --bundle-ca-file=/etc/pki/tls/ca.crt
         command:
         - /core
         image: quay.io/operator-framework/rukpak:v0.8.0
@@ -68,5 +68,4 @@ spec:
         name: upload-cache
       - name: certs
         secret:
-          optional: false
-          secretName: core-cert
+          secretName: openshift-rukpak-admission-webhook-tls
