@@ -18,8 +18,8 @@ spec:
         app: webhooks
     spec:
       affinity:
-        podAntiAffinity: 
-          requiredDuringSchedulingIgnoredDuringExecution: 
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchLabels:
                 app: webhooks
@@ -43,4 +43,4 @@ spec:
         - name: cert
           secret:
             defaultMode: 420
-            secretName: rukpak-webhook-certificate
+            secretName: openshift-rukpak-admission-webhook-tls

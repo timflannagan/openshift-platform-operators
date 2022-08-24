@@ -41,12 +41,12 @@ spec:
           command: ["/core"]
           args:
             - "--unpack-image=quay.io/operator-framework/rukpak:v0.8.0"
-            - "--base-upload-manager-url=https://$(CORE_SERVICE_NAME).$(CORE_SERVICE_NAMESPACE).svc"
             - "--provisioner-storage-dir=/var/cache/bundles"
             - "--upload-storage-dir=/var/cache/uploads"
+            - "--bundle-ca-file=/etc/pki/tls/tls.crt"
+            - "--base-upload-manager-url=https://$(CORE_SERVICE_NAME).$(CORE_SERVICE_NAMESPACE).svc"
             - "--http-bind-address=127.0.0.1:8080"
             - "--http-external-address=https://$(CORE_SERVICE_NAME).$(CORE_SERVICE_NAMESPACE).svc"
-            - "--bundle-ca-file=/etc/pki/tls/ca.crt"
           ports:
             - containerPort: 8080
           volumeMounts:
@@ -63,5 +63,4 @@ spec:
           emptyDir: {}
         - name: certs
           secret:
-            secretName: core-cert
-            optional: false
+            secretName: openshift-rukpak-admission-webhook-tls
