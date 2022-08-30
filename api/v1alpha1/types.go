@@ -16,10 +16,43 @@ limitations under the License.
 
 package v1alpha1
 
+import (
+	platformv1alpha1 "github.com/openshift/api/platform/v1alpha1"
+)
+
 var (
 	TypeApplied = "Applied"
 
 	ReasonSourceFailed    = "SourceFailed"
+	ReasonUnpackPending   = "ApplyPending"
 	ReasonApplyFailed     = "ApplyFailed"
 	ReasonApplySuccessful = "ApplySuccessful"
 )
+
+const (
+	SourcedBundleAnnotation = "platform.openshift.io/sourced-bundle"
+)
+
+func GetDesiredBundle(po *platformv1alpha1.PlatformOperator) string {
+	annotations := po.GetAnnotations()
+	desiredBundle, ok := annotations[SourcedBundleAnnotation]
+	if ok {
+		return desiredBundle
+	}
+	return ""
+}
+
+func SetDesiredBundle(po *platformv1alpha1.PlatformOperator, desiredBundle string) {
+	annotations := po.GetAnnotations()
+	if annotations == nil {
+		annotations = make(map[string]string)
+	}
+	annotations[SourcedBundleAnnotation] = desiredBundle
+	po.SetAnnotations(annotations)
+}
+
+func SetActiveBundleDeployment(po *platformv1alpha1.PlatformOperator, name string) {
+	po.Status.ActiveBundleDeployment = platformv1alpha1.ActiveBundleDeployment{
+		Name: name,
+	}
+}

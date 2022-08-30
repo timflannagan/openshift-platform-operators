@@ -21,3 +21,19 @@ func (b Bundle) String() string {
 type Sourcer interface {
 	Source(context.Context, *platformv1alpha1.PlatformOperator) (*Bundle, error)
 }
+
+func NewNoopSourcer() *noopSourcer {
+	return &noopSourcer{}
+}
+
+type noopSourcer struct {
+	b *Bundle
+}
+
+func (no *noopSourcer) SetBundle(b *Bundle) {
+	no.b = b
+}
+
+func (no *noopSourcer) Source(context.Context, *platformv1alpha1.PlatformOperator) (*Bundle, error) {
+	return nil, nil
+}

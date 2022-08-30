@@ -2,6 +2,7 @@ package applier
 
 import (
 	"context"
+	"fmt"
 
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -9,7 +10,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	platformv1alpha1 "github.com/openshift/api/platform/v1alpha1"
-	"github.com/openshift/platform-operators/internal/sourcer"
+	platformtypes "github.com/openshift/platform-operators/api/v1alpha1"
 )
 
 const (
@@ -27,17 +28,22 @@ func NewBundleDeploymentHandler(c client.Client) Applier {
 	}
 }
 
-func (a *bdApplier) Apply(ctx context.Context, po *platformv1alpha1.PlatformOperator, b *sourcer.Bundle) error {
-	bi := &rukpakv1alpha1.BundleDeployment{}
-	bi.SetName(po.GetName())
+func (a *bdApplier) Apply(ctx context.Context, po *platformv1alpha1.PlatformOperator) (client.Object, error) {
+	desiredBundle := platformtypes.GetDesiredBundle(po)
+	if desiredBundle == "" {
+		return nil, fmt.Errorf("validation failed: desired bundle annotation is empty")
+	}
+
+	bd := &rukpakv1alpha1.BundleDeployment{}
+	bd.SetName(po.GetName())
 	controllerRef := metav1.NewControllerRef(po, po.GroupVersionKind())
 
-	_, err := controllerutil.CreateOrUpdate(ctx, a.Client, bi, func() error {
-		bi.SetOwnerReferences([]metav1.OwnerReference{*controllerRef})
-		bi.Spec = *buildBundleDeployment(b.Image)
+	_, err := controllerutil.CreateOrUpdate(ctx, a.Client, bd, func() error {
+		bd.SetOwnerReferences([]metav1.OwnerReference{*controllerRef})
+		bd.Spec = *buildBundleDeployment(desiredBundle)
 		return nil
 	})
-	return err
+	return bd, err
 }
 
 // buildBundleDeployment is responsible for taking a name and image to create an embedded BundleDeployment
@@ -48,9 +54,6 @@ func buildBundleDeployment(image string) *rukpakv1alpha1.BundleDeploymentSpec {
 		// resource has been created on cluster despite the field being omitempty.
 		Template: &rukpakv1alpha1.BundleTemplate{
 			Spec: rukpakv1alpha1.BundleSpec{
-				// TODO(tflannag): Dynamically determine provisioner ID based on bundle
-				// format? Do we need an API for discovering available provisioner IDs
-				// in the cluster, and to map those ID(s) to bundle formats?
 				ProvisionerClassName: registryProvisionerID,
 				Source: rukpakv1alpha1.BundleSource{
 					Type: rukpakv1alpha1.SourceTypeImage,

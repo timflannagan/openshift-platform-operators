@@ -23,7 +23,6 @@ import (
 	rukpakv1alpha1 "github.com/operator-framework/rukpak/api/v1alpha1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/handler"
@@ -42,7 +41,6 @@ type PlatformOperatorReconciler struct {
 	client.Client
 	Sourcer sourcer.Sourcer
 	Applier applier.Applier
-	Scheme  *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=platform.openshift.io,resources=platformoperators,verbs=get;list;watch;create;update;patch;delete
@@ -62,7 +60,6 @@ func (r *PlatformOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	log.Info("reconciling request", "req", req.NamespacedName)
 	defer log.Info("finished reconciling request", "req", req.NamespacedName)
 
-	// TODO: flesh out status condition management
 	po := &platformv1alpha1.PlatformOperator{}
 	if err := r.Get(ctx, req.NamespacedName, po); err != nil {
 		return ctrl.Result{}, client.IgnoreNotFound(err)
@@ -70,12 +67,20 @@ func (r *PlatformOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	defer func() {
 		po := po.DeepCopy()
 		po.ObjectMeta.ManagedFields = nil
+
+		if err := r.Patch(ctx, po, client.Apply, client.FieldOwner("platformoperator")); err != nil {
+			log.Error(err, "failed to patch status")
+		}
 		if err := r.Status().Patch(ctx, po, client.Apply, client.FieldOwner("platformoperator")); err != nil {
 			log.Error(err, "failed to patch status")
 		}
 	}()
 
-	desiredBundle, err := r.Sourcer.Source(ctx, po)
+	return r.reconcile(ctx, po)
+}
+
+func (r *PlatformOperatorReconciler) reconcile(ctx context.Context, po *platformv1alpha1.PlatformOperator) (ctrl.Result, error) {
+	desiredBundle, err := r.ensureDesiredBundle(ctx, po)
 	if err != nil {
 		meta.SetStatusCondition(&po.Status.Conditions, metav1.Condition{
 			Type:    platformtypes.TypeApplied,
@@ -85,7 +90,11 @@ func (r *PlatformOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		})
 		return ctrl.Result{}, err
 	}
-	if err := r.Applier.Apply(ctx, po, desiredBundle); err != nil {
+	// TODO: we're never getting here...
+	platformtypes.SetDesiredBundle(po, desiredBundle)
+
+	bd, err := r.ensureDesiredBundleDeployment(ctx, po)
+	if err != nil {
 		meta.SetStatusCondition(&po.Status.Conditions, metav1.Condition{
 			Type:    platformtypes.TypeApplied,
 			Status:  metav1.ConditionUnknown,
@@ -94,13 +103,87 @@ func (r *PlatformOperatorReconciler) Reconcile(ctx context.Context, req ctrl.Req
 		})
 		return ctrl.Result{}, err
 	}
+
+	// TODO: abstract into a health checker type?
+	if failureCond := r.inspectBundleDeploymentStatus(ctx, bd.Status.Conditions); failureCond != nil {
+		meta.SetStatusCondition(&po.Status.Conditions, *failureCond)
+		return ctrl.Result{}, nil
+	}
 	meta.SetStatusCondition(&po.Status.Conditions, metav1.Condition{
 		Type:    platformtypes.TypeApplied,
 		Status:  metav1.ConditionTrue,
 		Reason:  platformtypes.ReasonApplySuccessful,
 		Message: "Successfully applied the desired olm.bundle content",
 	})
+	platformtypes.SetActiveBundleDeployment(po, bd.GetName())
+
 	return ctrl.Result{}, nil
+}
+
+func (r *PlatformOperatorReconciler) ensureDesiredBundle(ctx context.Context, po *platformv1alpha1.PlatformOperator) (string, error) {
+	// check whether we've already sourced a registry+v1 bundle for this
+	// platform operator to avoid unnecessarily running the sourcing logic.
+	desiredBundle := platformtypes.GetDesiredBundle(po)
+	if desiredBundle != "" {
+		return desiredBundle, nil
+	}
+
+	sourcedBundle, err := r.Sourcer.Source(ctx, po)
+	if err != nil {
+		return "", err
+	}
+	return sourcedBundle.Image, nil
+}
+
+func (r *PlatformOperatorReconciler) ensureDesiredBundleDeployment(ctx context.Context, po *platformv1alpha1.PlatformOperator) (*rukpakv1alpha1.BundleDeployment, error) {
+	object, err := r.Applier.Apply(ctx, po)
+	if err != nil {
+		return nil, err
+	}
+	bd, ok := object.(*rukpakv1alpha1.BundleDeployment)
+	if !ok {
+		panic("failed to type cast client.Object from the Apply method to a BundleDeployment type")
+	}
+	return bd, nil
+}
+
+func (r *PlatformOperatorReconciler) inspectBundleDeploymentStatus(_ context.Context, conditions []metav1.Condition) *metav1.Condition {
+	unpacked := meta.FindStatusCondition(conditions, rukpakv1alpha1.TypeHasValidBundle)
+	if unpacked == nil {
+		return &metav1.Condition{
+			Type:    platformtypes.TypeApplied,
+			Status:  metav1.ConditionFalse,
+			Reason:  platformtypes.ReasonUnpackPending,
+			Message: "Waiting for the bundle to be unpacked",
+		}
+	}
+	if unpacked.Status != metav1.ConditionTrue {
+		return &metav1.Condition{
+			Type:    platformtypes.TypeApplied,
+			Status:  metav1.ConditionFalse,
+			Reason:  unpacked.Reason,
+			Message: unpacked.Message,
+		}
+	}
+
+	applied := meta.FindStatusCondition(conditions, rukpakv1alpha1.TypeInstalled)
+	if applied == nil {
+		return &metav1.Condition{
+			Type:    platformtypes.TypeApplied,
+			Status:  metav1.ConditionFalse,
+			Reason:  platformtypes.ReasonUnpackPending,
+			Message: "Waiting for the bundle to be unpacked",
+		}
+	}
+	if applied.Status != metav1.ConditionTrue {
+		return &metav1.Condition{
+			Type:    platformtypes.TypeApplied,
+			Status:  metav1.ConditionFalse,
+			Reason:  applied.Reason,
+			Message: applied.Message,
+		}
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
